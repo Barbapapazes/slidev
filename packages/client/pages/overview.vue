@@ -43,7 +43,7 @@ const edittingNote = ref<number | null>(null)
 let ignoreOverviewScrollUntil = 0
 let pendingOverviewScrollNo: number | undefined
 let overviewScrollTimer: ReturnType<typeof setTimeout> | undefined
-const skipHashScroll = ref<string>()
+const skipHashScroll = new Set<string>()
 const wordCounts = computed(() => slides.value.map(route => wordCount(route.meta?.slide?.note || '')))
 const totalWords = computed(() => wordCounts.value.reduce((a, b) => a + b, 0))
 const totalClicks = computed(() => slides.value.map(route => getSlideClicks(route)).reduce((a, b) => a + b, 0))
@@ -130,12 +130,8 @@ function openSlideInBrowser(path: string) {
   openSlideInNewTab(path)
 }
 
-function getSlideHashId(no: number) {
-  return `slide-${no}`
-}
-
 function getSlideHash(no: number) {
-  return `#${getSlideHashId(no)}`
+  return `#slide-${no}`
 }
 
 function getSlideIndexFromHash(hash: string) {
@@ -165,15 +161,21 @@ async function scrollToSlideAndUpdateHash(idx: number) {
 
   const hash = getSlideHash(target.no)
   if (currentRoute.hash !== hash) {
-    skipHashScroll.value = hash // Used to bypass the scroll triggered by hash change
-    await router.replace({
-      path: currentRoute.path,
-      query: currentRoute.query,
-      hash,
-    })
+    skipHashScroll.add(hash) // Used to bypass the scroll triggered by hash change
+    try {
+      await router.replace({
+        path: currentRoute.path,
+        query: currentRoute.query,
+        hash,
+      })
+    }
+    finally {
+      skipHashScroll.delete(hash)
+    }
   }
 
-  scrollToSlide(idx)
+  if (currentRoute.hash === hash)
+    scrollToSlide(idx)
 }
 
 function scrollToRouteHash(behavior: ScrollBehavior = 'auto') {
@@ -337,14 +339,13 @@ watch(
     if (!hash)
       return
 
+    if (skipHashScroll.delete(hash))
+      return
+
     await nextTick()
 
-    if (skipHashScroll.value === hash) {
-      skipHashScroll.value = undefined
-      return
-    }
-
-    scrollToRouteHash('smooth')
+    if (currentRoute.hash === hash)
+      scrollToRouteHash('smooth')
   },
 )
 
@@ -431,7 +432,7 @@ onUnmounted(() => {
     >
       <div
         v-for="(route, idx) of slides"
-        :id="getSlideHashId(route.no)"
+        :id="`slide-${route.no}`"
         :key="route.no"
         :ref="el => blocks.set(idx, el as any)"
         class="overview-slide-block relative of-hidden flex gap-4 min-h-50"
